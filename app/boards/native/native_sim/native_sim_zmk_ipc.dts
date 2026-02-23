@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2024 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/*
+ * native_sim/native/zmk_ipc board variant
+ *
+ * Provides a minimal 4×12 (48-key) IPC kscan device.
+ * The actual matrix dimensions should match your keymap.
+ *
+ * Key events are sent to /tmp/zmk_kscan_ipc.sock as JSON lines:
+ *   {"type":"key_press",  "row": 0, "col": 0}
+ *   {"type":"key_release","row": 0, "col": 0}
+ *
+ *   {"type":"key_press",  "position": 5}   <- position = row*12 + col
+ *   {"type":"key_release","position": 5}
+ */
+
+#include <../boards/native/native_sim/native_sim.dts>
+#include <dt-bindings/zmk/keys.h>
+
+/ {
+    chosen {
+        zmk,kscan = &kscan_ipc;
+    };
+
+    kscan_ipc: kscan_ipc_0 {
+        compatible = "zmk,kscan-ipc";
+        socket-path = "/tmp/zmk_kscan_ipc.sock";
+        rows    = <4>;
+        columns = <12>;
+    };
+};

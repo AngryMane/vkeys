@@ -1,0 +1,236 @@
+// Copyright (c) 2024 The ZMK Contributors
+// SPDX-License-Identifier: MIT
+//
+// ZMK IPC API — Protobuf schema
+//
+// Defines bidirectional communication between a ZMK native_sim process and
+// external clients (e.g. the vkeys Tauri host application).
+//
+// ┌──────────────────────┐  KeyEvent stream   ┌────────────────────────┐
+// │  Client              │ ─────────────────► │  ZMK (native_sim)      │
+// │  (Rust / Python /    │                    │                        │
+// │   any gRPC client)   │ ◄───────────────── │  kscan_ipc driver      │
+// └──────────────────────┘  ZmkEvent stream   │  ipc_observer module   │
+//                                             └────────────────────────┘
+//
+// Transport note
+// ──────────────
+// Full HTTP/2 gRPC is not integrated into Zephyr's native_sim build.
+// The wire transport used here is a Unix domain socket with a simple
+// length-prefix framing:
+//
+//   [ 4-byte big-endian message length ][ protobuf-encoded bytes ]
+//
+// The .proto service definitions below document the logical API and are
+// used to generate typed client stubs (e.g. tonic for Rust, grpcio for
+// Python).  A thin adapter on the client side substitutes the HTTP/2
+// transport for the length-prefixed Unix socket transport.
+//
+// Socket paths (configurable via Kconfig / DTS):
+//   Input  (client → ZMK):  /tmp/zmk_kscan_ipc.sock   (kscan_ipc driver)
+//   Output (ZMK → client):  /tmp/zmk_ipc.sock          (ipc_observer)
+
+syntax = "proto3";
+
+package zmk.ipc;
+
+option java_package = "dev.zmk.ipc";
+option java_outer_classname = "ZmkIpcProto";
+option go_package = "github.com/zmkfirmware/zmk/ipc";
+
+// ============================================================
+// § 1  Shared / common types
+// ============================================================
+
+// HID transport over which a report was sent.
+enum TransportType {
+    TRANSPORT_UNSPECIFIED = 0;
+    // No transport is active (keyboard not connected).
+    TRANSPORT_NONE        = 1;
+    // USB HID.
+    TRANSPORT_USB         = 2;
+    // Bluetooth HID over GATT (HOG).
+    TRANSPORT_BLE         = 3;
+}
+
+// Identifies the specific endpoint (transport + optional BLE profile).
+message Endpoint {
+    TransportType transport       = 1;
+    // BLE profile index (0-based). Meaningful only when
+    // transport == TRANSPORT_BLE.
+    uint32        ble_profile_idx = 2;
+}
+
+// ============================================================
+// § 2  Input messages  (Client → ZMK)
+//      These messages are fed to the kscan_ipc driver which
+//      injects them into ZMK's keyboard scan pipeline.
+// ============================================================
+
+// Position in the logical key matrix.
+message KeyPosition {
+    uint32 row = 1;
+    uint32 col = 2;
+}
+
+// A key press or release event.
+message KeyEvent {
+    // Whether this is a press or a release.
+    enum Action {
+        ACTION_UNSPECIFIED = 0;
+        PRESS              = 1;
+        RELEASE            = 2;
+    }
+    Action action = 1;
+
+    // Key address — either explicit row/col or a linear position.
+    // Linear position is converted by the driver as:
+    //   row = position / columns   (columns from the DTS `columns` property)
+    //   col = position % columns
+    oneof address {
+        KeyPosition key_pos  = 2;
+        uint32      position = 3;
+    }
+}
+
+// Top-level wrapper for all client → ZMK messages.
+// Extend with additional variants (e.g. reset, layer control) as needed.
+message ClientMessage {
+    oneof payload {
+        KeyEvent key_event = 1;
+    }
+}
+
+// ============================================================
+// § 3  Output messages  (ZMK → Client)
+//      These notifications are emitted by the ipc_observer module.
+// ============================================================
+
+// Raw key matrix event from the kscan subsystem.
+// Corresponds to zmk_position_state_changed in ZMK's event system.
+// Fired before keymap processing (before any hold-tap / combo logic).
+message KscanEvent {
+    // Source identifier.
+    // ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL == 255 means the local MCU.
+    uint32 source    = 1;
+    // Linear position in the key matrix (row * columns + col).
+    uint32 position  = 2;
+    // true = key pressed, false = key released.
+    bool   pressed   = 3;
+    // Kernel uptime at event time, milliseconds.
+    int64  timestamp = 4;
+}
+
+// HID keyboard report sent to a transport endpoint.
+// Fired after keymap + modifier processing, immediately before the report
+// is written to USB / BLE.
+//
+// Modifier byte bit layout (USB HID spec, page 59):
+//   bit 0 – Left Ctrl    bit 4 – Right Ctrl
+//   bit 1 – Left Shift   bit 5 – Right Shift
+//   bit 2 – Left Alt     bit 6 – Right Alt
+//   bit 3 – Left GUI     bit 7 – Right GUI
+//
+// keys byte layout:
+//   HKRO mode: 6 bytes, each a HID usage ID (0 = not pressed)
+//   NKRO mode: bitmap of all supported HID usage IDs
+message HidKeyboardReport {
+    Endpoint endpoint  = 1;
+    uint32   modifiers = 2;
+    // Raw key bytes — length depends on HKRO / NKRO build configuration.
+    bytes    keys      = 3;
+}
+
+// HID consumer (media key) report sent to a transport endpoint.
+//
+// keys byte layout:
+//   BASIC mode (CONFIG_ZMK_HID_CONSUMER_REPORT_USAGES_BASIC):
+//     N × uint8  (one usage ID per slot, up to 0xFF)
+//   FULL mode (CONFIG_ZMK_HID_CONSUMER_REPORT_USAGES_FULL):
+//     N × uint16 little-endian (one usage ID per slot, up to 0xFFF)
+//   N = CONFIG_ZMK_HID_CONSUMER_REPORT_SIZE (default 6)
+message HidConsumerReport {
+    Endpoint endpoint = 1;
+    // Raw key bytes — interpret according to consumer report mode above.
+    bytes    keys     = 2;
+}
+
+// HID mouse / pointing report sent to a transport endpoint.
+// Only present when CONFIG_ZMK_POINTING is enabled.
+message HidMouseReport {
+    Endpoint endpoint = 1;
+    // Button bitmask (bit N = button N+1 pressed).
+    uint32   buttons  = 2;
+    // Pointer displacement since last report (HID resolution units).
+    sint32   dx       = 3;
+    sint32   dy       = 4;
+    // Scroll wheel displacement.
+    sint32   scroll_x = 5;
+    sint32   scroll_y = 6;
+}
+
+// Top-level wrapper for all ZMK → client notifications.
+message ZmkEvent {
+    oneof payload {
+        KscanEvent        kscan_event = 1;
+        HidKeyboardReport keyboard    = 2;
+        HidConsumerReport consumer    = 3;
+        HidMouseReport    mouse       = 4;
+    }
+}
+
+// ============================================================
+// § 4  Utility messages
+// ============================================================
+
+// Used as a placeholder return type where no response data is needed.
+message Empty {}
+
+// ============================================================
+// § 5  gRPC service definition
+//
+// The service describes the logical API.  Because the Zephyr side uses
+// nanopb + length-prefix framing over a Unix socket (not HTTP/2), a
+// thin transport adapter is required on the client side.
+//
+// Recommended client adapter (Rust / tonic):
+//   1. Connect to /tmp/zmk_ipc.sock       (ZmkIpc.WatchEvents)
+//   2. Connect to /tmp/zmk_kscan_ipc.sock  (ZmkIpc.SendKeys)
+//   3. Read / write length-prefixed protobuf frames:
+//        [uint32 big-endian length][proto bytes]
+// ============================================================
+
+service ZmkIpc {
+    // ── Input ──────────────────────────────────────────────────────────
+    //
+    // Client streams key press / release events to ZMK.
+    // ZMK injects each event into the kscan subsystem for normal keymap
+    // processing (layers, hold-tap, combos, etc.).
+    //
+    // The stream stays open as long as the client wants to send events.
+    // Returns Empty when the client closes the stream.
+    rpc SendKeys(stream ClientMessage) returns (Empty);
+
+    // ── Output ─────────────────────────────────────────────────────────
+    //
+    // Client subscribes to ZMK events.
+    // The server streams two categories of events:
+    //
+    //   kscan_event  – raw matrix events (before keymap processing)
+    //   keyboard /
+    //   consumer /
+    //   mouse        – HID reports (after keymap processing, at send time)
+    //
+    // The stream stays open until the client closes it or ZMK exits.
+    rpc WatchEvents(Empty) returns (stream ZmkEvent);
+
+    // ── Bidirectional (convenience) ─────────────────────────────────────
+    //
+    // Combines SendKeys and WatchEvents into a single bidirectional stream.
+    // Useful when a single connection is preferred over two separate ones.
+    //
+    // Client sends ClientMessage frames; server sends ZmkEvent frames.
+    // Both streams are independent — the server will push events regardless
+    // of whether the client is currently sending.
+    rpc Connect(stream ClientMessage) returns (stream ZmkEvent);
+}

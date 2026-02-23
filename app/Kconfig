@@ -691,6 +691,59 @@ config ZMK_KEYMAP_SENSORS_DEFAULT_TRIGGERS_PER_ROTATION
 
 endif # ZMK_KEYMAP_SENSORS
 
+menu "IPC Observer"
+
+config ZMK_IPC_OBSERVER
+    bool "ZMK IPC Observer (Unix socket event notifications)"
+    depends on ARCH_POSIX
+    select NANOPB
+    help
+      Enable a Unix domain socket server that broadcasts JSON-lines events to
+      connected clients for two event categories:
+        - keyscan: position_state_changed events from the kscan driver
+        - hid_report: HID reports sent to USB / BLE endpoints
+      Only available on native_sim / native_posix builds (ARCH_POSIX).
+
+if ZMK_IPC_OBSERVER
+
+config ZMK_IPC_OBSERVER_SOCKET_PATH
+    string "Unix socket path"
+    default "/tmp/zmk_ipc.sock"
+    help
+      Filesystem path for the Unix domain socket. Any process with access to
+      this path can connect and receive JSON event notifications.
+
+config ZMK_IPC_OBSERVER_MAX_CLIENTS
+    int "Maximum simultaneous clients"
+    default 4
+    range 1 16
+    help
+      Maximum number of clients that can be connected to the IPC socket at
+      the same time. Excess connections are rejected.
+
+config ZMK_IPC_OBSERVER_THREAD_STACK_SIZE
+    int "Accept thread stack size (bytes)"
+    default 2048
+    help
+      Stack size for the internal thread that calls accept() on the server
+      socket. Increase if you see stack overflows in the ZMK IPC observer.
+
+config ZMK_IPC_OBSERVER_INIT_PRIORITY
+    int "Initialisation priority"
+    default 91
+    help
+      SYS_INIT priority for the IPC observer. Must be higher than
+      CONFIG_APPLICATION_INIT_PRIORITY (typically 90) so that the ZMK
+      subsystems it depends on are already initialised.
+
+module = ZMK_IPC_OBSERVER
+module-str = zmk_ipc_observer
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # ZMK_IPC_OBSERVER
+
+endmenu # IPC Observer
+
 module = ZMK
 module-str = zmk
 source "subsys/logging/Kconfig.template.log_config"

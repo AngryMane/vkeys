@@ -104,6 +104,20 @@ target_sources_ifdef(CONFIG_ZMK_USB app PRIVATE src/usb_hid.c)
 target_sources_ifdef(CONFIG_ZMK_RGB_UNDERGLOW app PRIVATE src/rgb_underglow.c)
 target_sources_ifdef(CONFIG_ZMK_BACKLIGHT app PRIVATE src/backlight.c)
 target_sources_ifdef(CONFIG_ZMK_LOW_PRIORITY_WORK_QUEUE app PRIVATE src/workqueue.c)
+target_sources_ifdef(CONFIG_ZMK_IPC_OBSERVER app PRIVATE src/ipc_observer.c)
+
+if (CONFIG_ZMK_IPC_OBSERVER OR CONFIG_ZMK_KSCAN_IPC_DRIVER)
+  # Pre-generated nanopb stubs for the ZMK IPC protocol.
+  # The NANOPB Kconfig selection (via select NANOPB in Kconfig) ensures the
+  # nanopb runtime library (pb.h, pb_encode.h, pb_decode.h) is in the include
+  # path.  We only need to add our own generated headers and source files.
+  zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/ipc_pb)
+  target_sources(app PRIVATE
+    src/ipc_pb/zmk_ipc.pb.c
+    src/ipc_pb/zmk_ipc_framing.c
+  )
+endif()
+
 target_sources(app PRIVATE src/main.c)
 
 add_subdirectory(src/display/)

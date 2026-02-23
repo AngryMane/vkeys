@@ -1,0 +1,44 @@
+# Copyright (c) 2024 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  IPC (Unix domain socket) keyboard scan driver.
+  Available only on native_sim / native_posix (ARCH_POSIX) builds.
+
+  Listens on a Unix domain socket and accepts JSON-line key events from
+  a connected client. Supported formats:
+
+    {"type":"key_press",  "row": 0, "col": 0}
+    {"type":"key_release","row": 0, "col": 0}
+
+    {"type":"key_press",  "position": 5}
+    {"type":"key_release","position": 5}
+
+  When using position-based events, `columns` must be set so the driver
+  can compute row = position / columns, col = position % columns.
+
+compatible: "zmk,kscan-ipc"
+
+include: kscan.yaml
+
+properties:
+  socket-path:
+    type: string
+    default: "/tmp/zmk_kscan_ipc.sock"
+    description: |
+      Filesystem path for the Unix domain socket server.
+      The driver creates (or re-creates) this socket on init.
+
+  rows:
+    type: int
+    required: true
+    description: Number of rows in the logical key matrix.
+
+  columns:
+    type: int
+    required: true
+    description: |
+      Number of columns in the logical key matrix.
+      Also used to convert position-based events:
+        row = position / columns
+        col  = position % columns

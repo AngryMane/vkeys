@@ -1,0 +1,12 @@
+# nanopb field constraints for zmk_ipc.proto
+#
+# All variable-length fields must have a max_size or max_count specified
+# so nanopb can use static (stack/BSS) allocation instead of dynamic memory.
+#
+# Sizing rationale:
+#   HidKeyboardReport.keys  – HKRO: 6 bytes, NKRO: up to 25 bytes → 32
+#   HidConsumerReport.keys  – FULL: 6×2=12 bytes, BASIC: 6×1=6 bytes → 16
+#   HidMouseReport          – all fixed-size scalar fields, no constraint needed
+
+zmk.ipc.HidKeyboardReport.keys     max_size:32
+zmk.ipc.HidConsumerReport.keys     max_size:16

@@ -20,6 +20,7 @@
 #include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/events/endpoint_changed.h>
+#include <zmk/ipc_observer.h>
 
 #include <zephyr/logging/log.h>
 
@@ -174,6 +175,10 @@ struct zmk_endpoint_instance zmk_endpoint_get_selected(void) { return current_in
 bool zmk_endpoint_is_connected(void) { return current_instance.transport != ZMK_TRANSPORT_NONE; }
 
 static int send_keyboard_report(void) {
+    char endpoint_str[ZMK_ENDPOINT_STR_LEN];
+    zmk_endpoint_instance_to_str(current_instance, endpoint_str, sizeof(endpoint_str));
+    zmk_ipc_observer_notify_keyboard_report(endpoint_str);
+
     switch (current_instance.transport) {
     case ZMK_TRANSPORT_NONE:
         return 0;
@@ -211,6 +216,10 @@ static int send_keyboard_report(void) {
 }
 
 static int send_consumer_report(void) {
+    char endpoint_str[ZMK_ENDPOINT_STR_LEN];
+    zmk_endpoint_instance_to_str(current_instance, endpoint_str, sizeof(endpoint_str));
+    zmk_ipc_observer_notify_consumer_report(endpoint_str);
+
     switch (current_instance.transport) {
     case ZMK_TRANSPORT_NONE:
         return 0;
@@ -263,6 +272,10 @@ int zmk_endpoint_send_report(uint16_t usage_page) {
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
 int zmk_endpoint_send_mouse_report() {
+    char endpoint_str[ZMK_ENDPOINT_STR_LEN];
+    zmk_endpoint_instance_to_str(current_instance, endpoint_str, sizeof(endpoint_str));
+    zmk_ipc_observer_notify_mouse_report(endpoint_str);
+
     switch (current_instance.transport) {
     case ZMK_TRANSPORT_NONE:
         return 0;
